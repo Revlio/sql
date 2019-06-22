@@ -1,0 +1,109 @@
+--BASIC
+-- Top 100 tracks by appearance in playlists.
+SELECT tracks.Name, COUNT(*) AS "How many playlists" FROM playlist_track
+LEFT JOIN tracks ON playlist_track.TrackId = tracks.TrackId
+GROUP BY playlist_track.TrackId
+ORDER BY COUNT(playlist_track.PlaylistId) DESC
+LIMIT 100;
+
+-- Top 10 tracks by revenue
+SELECT invoice_items.TrackId, tracks.Name, SUM(Invoice_items.UnitPrice) FROM invoice_items
+LEFT JOIN tracks on invoice_items.TrackId = tracks.TrackId
+GROUP BY invoice_items.TrackId
+ORDER BY SUM(invoice_items.UnitPrice) DESC
+LIMIT 10;
+
+-- Top 10 albums by revenue
+SELECT tracks.AlbumId, albums.Title, SUM(invoice_items.UnitPrice) FROM tracks
+INNER JOIN invoice_items ON tracks.TrackId = invoice_items.TrackId
+INNER JOIN albums ON tracks.AlbumId = albums.AlbumId
+GROUP BY tracks.AlbumId
+ORDER BY SUM(invoice_items.UnitPrice) DESC
+LIMIT 10;
+
+-- Top 5 genres by revenue
+SELECT tracks.GenreId, genres.Name, SUM(invoice_items.UnitPrice)  FROM tracks
+INNER JOIN invoice_items ON tracks.TrackId = invoice_items.TrackId
+INNER JOIN genres ON tracks.GenreId = genres.GenreId
+GROUP BY tracks.GenreId
+ORDER BY SUM(invoice_items.UnitPrice) DESC
+LIMIT 5;
+
+-- Top 10 countries by revenue
+SELECT invoices.BillingCountry, SUM(invoice_items.UnitPrice) AS "Country revenue" FROM invoice_items
+JOIN invoices ON invoice_items.InvoiceId = invoices.InvoiceId
+GROUP BY invoices.BillingCountry
+ORDER BY SUM(invoice_items.UnitPrice) DESC
+LIMIT 10;
+
+-- Percentage of sales by country
+SELECT invoices.BillingCountry, SUM(invoice_items.UnitPrice) * 100 / (SELECT SUM(invoice_items.UnitPrice) FROM invoice_items) AS "Country revenue %" FROM invoice_items
+JOIN invoices ON invoice_items.InvoiceId = invoices.InvoiceId
+GROUP BY invoices.BillingCountry
+ORDER BY SUM(invoice_items.UnitPrice) DESC
+LIMIT 10;
+
+-- Number of customers supported by rep
+SELECT employees.FirstName, employees.LastName, employees.Title, COUNT(*) FROM employees
+INNER JOIN customers ON employees.EmployeeId = customers.SupportRepId
+GROUP BY employees.EmployeeId
+ORDER BY COUNT(customers.SupportRepId) DESC;
+
+-- Average revenue by sale
+SELECT AVG(Inv_value) 
+    FROM (
+    SELECT AVG(UnitPrice) AS "Inv_value" 
+    FROM invoice_items 
+    GROUP BY InvoiceId
+) invoice_items;
+
+-- Total sales
+SELECT SUM(UnitPrice) AS "Total sales" FROM invoice_items;
+-- OR
+SELECT SUM(Total) FROM invoices;
+
+-- INTERMEDIATE
+-- Do longer or shorter albums generate more? Nested queries: track_value determines 
+-- the total value of the track, album_length determines length of each album, and full_query
+-- brings these together into one query. The final query then orders the results on the average 
+-- album value.
+WITH 
+full_query AS
+(WITH 
+track_value AS (SELECT TrackId, SUM(UnitPrice) AS "SumPrice" 
+FROM invoice_items
+GROUP BY invoice_items.TrackId), 
+album_length AS (SELECT AlbumId, COUNT(*)
+FROM tracks
+GROUP BY AlbumId) 
+SELECT tracks.AlbumId AS AlbumNo, SUM(track_value.SumPrice) AS "AlbumValue", COUNT(*) AS AlbumLength FROM tracks
+LEFT JOIN track_value ON tracks.TrackId = track_value.TrackId
+GROUP BY tracks.AlbumId)
+SELECT AlbumNo, AVG(AlbumValue), AlbumLength FROM full_query
+GROUP BY AlbumLength
+ORDER BY AVG(AlbumValue) DESC;
+
+-- Is the number of times a track appears in any playlist a good indicator or revenue?
+-- playlist_numbers query establishes number of playlists a track appears in, and then this field
+-- is grouped and the unit price of the invoiced items averaged.
+WITH playlist_numbers AS 
+(SELECT TrackId, COUNT(*) AS TrackCount FROM playlist_track
+GROUP BY TrackId)
+SELECT playlist_numbers.TrackCount AS "PlaylistAppearances", AVG(invoice_items.UnitPrice) AS "Sales" FROM invoice_items
+INNER JOIN playlist_numbers ON invoice_items.TrackId = playlist_numbers.TrackId
+GROUP BY playlist_numbers.TrackCount
+ORDER BY Sales DESC;
+
+-- ADVANCED
+-- How much revenue is generated each year, and what is the percent change from the previous year?
+-- sub-query current_year shows the year and the summed sales, previous_year assigns those summed values to a year + 1
+-- these tables are joined and the % value determined by the % change formula.
+WITH current_year AS (
+SELECT strftime('%Y',invoices.InvoiceDate) AS CurrentYear, SUM(invoice_items.UnitPrice) AS YearSales FROM invoices
+INNER JOIN invoice_items ON invoices.InvoiceId = invoice_items.InvoiceId
+GROUP BY CurrentYear),
+previous_year AS (SELECT strftime('%Y',invoices.InvoiceDate) + 1 AS PreviousYear, SUM(invoice_items.UnitPrice) AS YearSales FROM invoices
+INNER JOIN invoice_items ON invoices.InvoiceId = invoice_items.InvoiceId
+GROUP BY PreviousYear)
+SELECT current_year.CurrentYear, current_year.YearSales, ((current_year.YearSales-previous_year.YearSales)/previous_year.YearSales * 100) AS PreviousSales FROM current_year
+LEFT JOIN previous_year ON CAST(current_year.CurrentYear AS INTEGER) = CAST(previous_year.PreviousYear AS INTEGER);
